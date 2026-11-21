@@ -4,9 +4,9 @@
 
 **Blocked by:** 01: End-to-end Extracted Frames and single Grid Sheet tracer bullet
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Computes per-frame RGB averages in the same decode pass as frame extraction (`format=rgb24,scale=1:1:flags=area+accurate_rnd`)
-- [ ] Writes `<prefix>_averagesRGB.csv` with UTF-8 encoding, `newline=""`, and header `frame,timestamp_sec,r,g,b`
-- [ ] Renders `<prefix>_averagesRGB.jpeg` via nearest-neighbor scaling (`flags=neighbor`) at `N * stripe_width` by `barcode_height` (default `1px` × `715px` per frame)
-- [ ] Verified with an automated integration test against synthetic solid/split color test frames asserting expected RGB values within <= 1 LSB and barcode dimensions
+- [x] Computes per-frame RGB averages in the same decode pass as frame extraction (`format=rgb24,scale=1:1:flags=area+accurate_rnd`)
+- [x] Writes `<prefix>_averagesRGB.csv` with UTF-8 encoding, `newline=""`, and header `frame,timestamp_sec,r,g,b`
+- [x] Renders `<prefix>_averagesRGB.jpeg` via nearest-neighbor scaling (`flags=neighbor`) at `N * stripe_width` by `barcode_height` (default `1px` × `715px` per frame)
+- [x] Verified with an automated integration test against synthetic solid/split color test frames asserting expected RGB values within <= 1 LSB and barcode dimensions

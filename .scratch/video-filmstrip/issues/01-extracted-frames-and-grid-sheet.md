@@ -4,9 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Extracts Extracted Frames into `<prefix>_filmstrip/frames/<prefix>-001.jpeg`... at 1 fps and original source resolution using FFmpeg's `fps` filter
-- [ ] Computes exact row count `ceil(N / 4)` from the actual extracted frame count `N` (no blank trailing rows)
-- [ ] Builds `<prefix>_filmstrip/<prefix>_grid.jpeg` at 3840px total width (960px per tile, aspect ratio preserved, centered pad if needed)
-- [ ] Verified with an automated integration test on a synthetic video covering partial trailing rows and non-16:9 aspect ratios
+- [x] Extracts Extracted Frames into `<prefix>_filmstrip/frames/<prefix>-001.jpeg`... at 1 fps and original source resolution using FFmpeg's `fps` filter
+- [x] Computes exact row count `ceil(N / 4)` from the actual extracted frame count `N` (no blank trailing rows)
+- [x] Builds `<prefix>_filmstrip/<prefix>_grid.jpeg` at 3840px total width (960px per tile, aspect ratio preserved, centered pad if needed)
+- [x] Verified with an automated integration test on a synthetic video covering partial trailing rows and non-16:9 aspect ratios
