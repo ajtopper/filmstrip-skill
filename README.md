@@ -38,6 +38,7 @@ python skills/video-filmstrip/scripts/generate_filmstrip.py path/to/video.mp4
 | `--quality` | `2` | FFmpeg MJPEG quality (`2`–`31`, lower is better) |
 | `--start` | — | Start offset in seconds (`-ss`) |
 | `--duration` | — | Clip duration in seconds (`-t`) |
+| `--no-frame-numbers` | `false` | Omit bottom-left Frame Badges from Grid Sheets |
 
 ## Installing as a Global Antigravity Skill
 

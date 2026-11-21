@@ -45,6 +45,7 @@ class FilmstripConfig:
     quality: int = 2
     start: float | None = None
     duration: float | None = None
+    frame_numbers: bool = True
 
     def validate(self) -> None:
         """Validate configuration bounds and numeric finiteness."""
@@ -309,63 +310,61 @@ def _build_grid_sheet(
     *,
     start_frame_number: int = 1,
     badge_diameter: int = BADGE_BASE_DIAMETER,
+    frame_numbers: bool = True,
 ) -> None:
-    """Assemble sheet_frames into a single Filmstrip Grid sheet with Frame Badges."""
-    min_tile_size = badge_diameter + 2 * BADGE_MARGIN
-    if geometry.tile_width < min_tile_size or geometry.tile_height < min_tile_size:
-        raise ValueError(
-            f"Tile size ({geometry.tile_width}x{geometry.tile_height}px) is too small "
-            f"for a {badge_diameter}px Frame Badge (minimum {min_tile_size}x{min_tile_size}px)."
-        )
-
+    """Assemble sheet_frames into a single Filmstrip Grid sheet (optionally badged)."""
     rows = math.ceil(len(sheet_frames) / geometry.cols)
-    font_path = _find_sans_serif_font()
-    font_opt = f"fontfile='{_filter_escape_path(font_path)}':" if font_path else ""
-    filter_complex = (
-        f"[0:v]scale={geometry.tile_width}:{geometry.tile_height}:force_original_aspect_ratio=decrease,"
+    scale_chain = (
+        f"scale={geometry.tile_width}:{geometry.tile_height}:force_original_aspect_ratio=decrease,"
         f"pad={geometry.tile_width}:{geometry.tile_height}:(ow-iw)/2:(oh-ih)/2:color=black,"
-        f"setsar=1[tile_base];"
-        f"[tile_base][1:v]overlay=x={BADGE_MARGIN}:y=H-h-{BADGE_MARGIN}:eof_action=repeat,"
-        f"drawtext={font_opt}text='%{{eif\\:n+{start_frame_number}\\:d}}':"
-        f"fontsize={BADGE_FONT_SIZE}:fontcolor=black:"
-        f"x={BADGE_MARGIN}+({badge_diameter}-tw)/2:"
-        f"y=h-{BADGE_MARGIN}-{badge_diameter}+({badge_diameter}-th)/2,"
-        f"tile={geometry.cols}x{rows}:color=black[out]"
+        f"setsar=1"
     )
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
         concat_file = tmp_path / "frames.txt"
         lines = [f"file '{_concat_escape(frame)}'\n" for frame in sheet_frames]
         concat_file.write_text("".join(lines), encoding="utf-8")
 
-        badge_pam = tmp_path / "badge.pam"
-        _write_circle_badge_pam(badge_pam, badge_diameter)
+        cmd = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat_file),
+        ]
+        if frame_numbers:
+            min_tile_size = badge_diameter + 2 * BADGE_MARGIN
+            if geometry.tile_width < min_tile_size or geometry.tile_height < min_tile_size:
+                raise ValueError(
+                    f"Tile size ({geometry.tile_width}x{geometry.tile_height}px) is too small "
+                    f"for a {badge_diameter}px Frame Badge (minimum {min_tile_size}x{min_tile_size}px)."
+                )
+            badge_pam = tmp_path / "badge.pam"
+            _write_circle_badge_pam(badge_pam, badge_diameter)
+            font_path = _find_sans_serif_font()
+            font_opt = f"fontfile='{_filter_escape_path(font_path)}':" if font_path else ""
+            filter_complex = (
+                f"[0:v]{scale_chain}[tile_base];"
+                f"[tile_base][1:v]overlay=x={BADGE_MARGIN}:y=H-h-{BADGE_MARGIN}:eof_action=repeat,"
+                f"drawtext={font_opt}text='%{{eif\\:n+{start_frame_number}\\:d}}':"
+                f"fontsize={BADGE_FONT_SIZE}:fontcolor=black:"
+                f"x={BADGE_MARGIN}+({badge_diameter}-tw)/2:"
+                f"y=h-{BADGE_MARGIN}-{badge_diameter}+({badge_diameter}-th)/2,"
+                f"tile={geometry.cols}x{rows}:color=black[out]"
+            )
+            cmd.extend(["-i", str(badge_pam), "-filter_complex", filter_complex, "-map", "[out]"])
+        else:
+            cmd.extend(["-vf", f"{scale_chain},tile={geometry.cols}x{rows}:color=black"])
 
-        _run_subprocess(
-            [
-                "ffmpeg",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-y",
-                "-f",
-                "concat",
-                "-safe",
-                "0",
-                "-i",
-                str(concat_file),
-                "-i",
-                str(badge_pam),
-                "-filter_complex",
-                filter_complex,
-                "-map",
-                "[out]",
-                "-q:v",
-                str(geometry.quality),
-                str(output_path),
-            ],
-            error_context="FFmpeg grid assembly failed",
-        )
+        cmd.extend(["-q:v", str(geometry.quality), str(output_path)])
+        _run_subprocess(cmd, error_context="FFmpeg grid assembly failed")
 
 
 def _write_grid_sheets(
@@ -373,6 +372,8 @@ def _write_grid_sheets(
     out_dir: Path,
     prefix: str,
     geometry: GridGeometry,
+    *,
+    frame_numbers: bool = True,
 ) -> list[Path]:
     """Write one Grid Sheet or split into numbered Grid Sheets below JPEG_MAX_DIMENSION."""
     if geometry.tile_height > JPEG_MAX_DIMENSION:
@@ -398,6 +399,7 @@ def _write_grid_sheets(
             geometry=geometry,
             output_path=single_grid,
             badge_diameter=badge_diameter,
+            frame_numbers=frame_numbers,
         )
         return [single_grid]
 
@@ -412,6 +414,7 @@ def _write_grid_sheets(
             output_path=sheet_path,
             start_frame_number=idx + 1,
             badge_diameter=badge_diameter,
+            frame_numbers=frame_numbers,
         )
         sheets.append(sheet_path)
     return sheets
@@ -506,6 +509,7 @@ def generate_filmstrip(video_path: Path, config: FilmstripConfig | None = None) 
         out_dir=out_dir,
         prefix=effective_prefix,
         geometry=geometry,
+        frame_numbers=cfg.frame_numbers,
     )
     _write_averages_csv(
         averages=averages,
@@ -589,6 +593,13 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Clip duration in seconds (-t equivalent).",
     )
+    parser.add_argument(
+        "--no-frame-numbers",
+        action="store_false",
+        dest="frame_numbers",
+        default=True,
+        help="Omit bottom-left frame index badges from the filmstrip grid.",
+    )
     args = parser.parse_args(argv)
     config = FilmstripConfig(
         output_dir=args.output_dir.resolve() if args.output_dir is not None else None,
@@ -601,6 +612,7 @@ def main(argv: list[str] | None = None) -> int:
         quality=args.quality,
         start=args.start,
         duration=args.duration,
+        frame_numbers=args.frame_numbers,
     )
     try:
         out_dir = generate_filmstrip(args.input_video.resolve(), config=config)

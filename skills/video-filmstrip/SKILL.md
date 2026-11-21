@@ -18,7 +18,7 @@ ffmpeg -version; ffprobe -version; python --version
 
 ## Steps
 
-1. Resolve the input video path and confirm whether the user wants custom options (frame rate, output directory, prefix, start/duration trim, or custom dimensions).
+1. Resolve the input video path and **ask the user whether they want the Filmstrip Grid tiles numbered with Frame Badges or unnumbered** (unless they already specified in their request), plus any optional overrides (frame rate, output directory, prefix, start/duration trim, or custom dimensions).
 2. Run [generate_filmstrip.py](./scripts/generate_filmstrip.py) with the input video path:
 
 ```powershell
@@ -27,6 +27,7 @@ python "<skill_dir>/scripts/generate_filmstrip.py" "<input_video>"
 
 Pass optional flags only when overriding defaults:
 
+- `--no-frame-numbers`: Omit the bottom-left 16px Frame Badges from Grid Sheets (pass when the user chooses unnumbered tiles)
 - `--output-dir <dir>`: Destination directory (default: `<prefix>_filmstrip` next to the input video)
 - `--prefix <name>`: Output filename prefix (default: input video stem)
 - `--fps <rate>`: Frames per second to extract (default: `1.0`)
@@ -40,7 +41,7 @@ Pass optional flags only when overriding defaults:
 
 3. Verify the generated artifacts inside the output folder:
    - `frames/<prefix>-001.jpeg` ... (kept Extracted Frames at original video resolution, unbadged)
-   - `<prefix>_grid.jpeg` or numbered `<prefix>_grid-001.jpeg` ... (4-column Filmstrip Grid sheets with bottom-left 16px Frame Badges showing 1-based appearance order on circular white backgrounds, auto-split at FFmpeg's `65500px` JPEG height cap)
+   - `<prefix>_grid.jpeg` or numbered `<prefix>_grid-001.jpeg` ... (4-column Filmstrip Grid sheets, with bottom-left 16px Frame Badges unless `--no-frame-numbers` was passed, auto-split at FFmpeg's `65500px` JPEG height cap)
    - `<prefix>_averagesRGB.jpeg` (Average Color Barcode)
    - `<prefix>_averagesRGB.csv` (`frame,timestamp_sec,r,g,b` rows matching the extracted frame count)
 4. Report the output directory and clickable links for the generated grid sheet(s), barcode, CSV, and frames folder.

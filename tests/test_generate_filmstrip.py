@@ -302,6 +302,23 @@ class FrameBadgeTests(unittest.TestCase):
             empty_cell = sample_rgb_region(grid_path, x=320, y=360 - 44, width=44, height=44)
             self.assertTrue(all(p[0] < 15 and p[1] < 15 and p[2] < 15 for p in empty_cell))
 
+    def test_no_frame_numbers_flag_disables_frame_badges(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            video = tmp_dir / "dark_plain.mkv"
+            create_lossless_black_video(video, duration_sec=3.0, width=320, height=180)
+
+            res = run_cli(str(video), "--no-frame-numbers")
+            self.assertEqual(res.returncode, 0, msg=res.stderr)
+
+            grid_path = tmp_dir / "dark_plain_filmstrip" / "dark_plain_grid.jpeg"
+            self.assertTrue(grid_path.is_file())
+            tile1_bl = sample_rgb_region(grid_path, x=0, y=540 - 44, width=44, height=44)
+            self.assertTrue(
+                all(p[0] < 15 and p[1] < 15 and p[2] < 15 for p in tile1_bl),
+                "Expected no Frame Badge when --no-frame-numbers is set",
+            )
+
 
 class MultiSheetGridTests(unittest.TestCase):
     def test_splits_into_numbered_grid_sheets_when_height_exceeds_jpeg_limit(self) -> None:
