@@ -23,3 +23,7 @@ _Avoid_: palette, color strip, spectrum
 **Average RGB CSV**:
 A comma-separated data file recording the per-frame mean red, green, and blue values corresponding to an Average Color Barcode.
 _Avoid_: color dump, metadata table
+
+**Frame Badge**:
+A bottom-left circular white marker with `16px` black text overlaid on each populated tile in a Grid Sheet to show its 1-based chronological appearance order.
+_Avoid_: watermark, stamp, caption

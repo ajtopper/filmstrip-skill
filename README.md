@@ -8,8 +8,8 @@ An Antigravity skill and zero-dependency Python + FFmpeg CLI for generating Extr
 
 Running the tool on `<video>.mp4` writes a `<prefix>_filmstrip/` folder (next to the video by default) containing:
 
-- `frames/<prefix>-001.jpeg` ... — Extracted Frames at the source video's original resolution (default `1 fps`).
-- `<prefix>_grid.jpeg` — 4-column, 4K-wide (`3840px`) Filmstrip Grid (`960px` per tile, preserving aspect ratio). Long videos whose grid height exceeds FFmpeg's `65500px` JPEG limit automatically split into numbered Grid Sheets (`<prefix>_grid-001.jpeg`, `<prefix>_grid-002.jpeg`, ...).
+- `frames/<prefix>-001.jpeg` ... — Extracted Frames at the source video's original resolution (default `1 fps`, unbadged).
+- `<prefix>_grid.jpeg` — 4-column, 4K-wide (`3840px`) Filmstrip Grid (`960px` per tile, preserving aspect ratio) with a bottom-left Frame Badge (`16px` black 1-based frame index inside a circular white background) on every populated tile. Long videos whose grid height exceeds FFmpeg's `65500px` JPEG limit automatically split into numbered Grid Sheets (`<prefix>_grid-001.jpeg`, `<prefix>_grid-002.jpeg`, ...) with continuous numbering.
 - `<prefix>_averagesRGB.jpeg` — Average Color Barcode (`1px` wide per frame × `715px` tall by default).
 - `<prefix>_averagesRGB.csv` — Average RGB CSV recording per-frame mean RGB values (`frame,timestamp_sec,r,g,b`).
 

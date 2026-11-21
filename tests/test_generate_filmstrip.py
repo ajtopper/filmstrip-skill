@@ -48,6 +48,31 @@ def create_synthetic_video(
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
+def create_lossless_black_video(
+    output_path: Path,
+    *,
+    duration_sec: float,
+    width: int,
+    height: int,
+    fps: int = 10,
+) -> None:
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        f"color=c=#000000:s={width}x{height}:r={fps}:duration={duration_sec},format=rgb24",
+        "-c:v",
+        "ffv1",
+        str(output_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+
 def run_cli(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(SCRIPT_PATH), *args],
@@ -57,6 +82,30 @@ def run_cli(*args: str, env: dict[str, str] | None = None) -> subprocess.Complet
         errors="replace",
         env=env,
     )
+
+
+def sample_rgb_region(
+    image_path: Path, x: int, y: int, width: int, height: int
+) -> list[tuple[int, int, int]]:
+    """Read raw RGB24 pixel triples from a rectangular region of an image via FFmpeg."""
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(image_path),
+        "-vf",
+        f"crop={width}:{height}:{x}:{y},format=rgb24",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "pipe:1",
+    ]
+    res = subprocess.run(cmd, check=True, capture_output=True)
+    raw = res.stdout
+    return [(raw[i], raw[i + 1], raw[i + 2]) for i in range(0, len(raw), 3)]
 
 
 class FilmstripExtractionAndGridTests(unittest.TestCase):
@@ -104,6 +153,154 @@ class FilmstripExtractionAndGridTests(unittest.TestCase):
             self.assertEqual(grid_w, 3840)
             # 960 * 1280 / 720 = 1706.67 -> single row, even tile height 1706 or 1708
             self.assertIn(grid_h, (1706, 1708))
+
+
+class FrameBadgeTests(unittest.TestCase):
+    def test_renders_bottom_left_white_circle_black_text_badge_on_populated_tiles_only(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            video = tmp_dir / "dark_five.mkv"
+            create_lossless_black_video(video, duration_sec=5.0, width=320, height=180)
+
+            res = run_cli(str(video))
+            self.assertEqual(res.returncode, 0, msg=res.stderr)
+
+            out_dir = tmp_dir / "dark_five_filmstrip"
+            grid_path = out_dir / "dark_five_grid.jpeg"
+            self.assertTrue(grid_path.is_file())
+            self.assertEqual(probe_image_size(grid_path), (3840, 1080))
+
+            # Tile 1 (col 0, row 0): bottom-left corner region (0..44, 496..540)
+            tile1_badge = sample_rgb_region(grid_path, x=0, y=540 - 44, width=44, height=44)
+            bright_pixels = [p for p in tile1_badge if p[0] > 220 and p[1] > 220 and p[2] > 220]
+            self.assertGreater(
+                len(bright_pixels), 150, "Expected white circular badge in tile 1 bottom-left"
+            )
+            # Check inner circle center region has dark glyph pixels ('1') surrounded by white
+            tile1_inner = sample_rgb_region(grid_path, x=14, y=540 - 30, width=16, height=16)
+            inner_dark = [p for p in tile1_inner if p[0] < 60 and p[1] < 60 and p[2] < 60]
+            inner_bright = [p for p in tile1_inner if p[0] > 220 and p[1] > 220 and p[2] > 220]
+            self.assertGreater(len(inner_dark), 10, "Expected black 16px digit inside white circle")
+            self.assertGreater(len(inner_bright), 40, "Expected white circle background around digit")
+
+            # Tile 5 (col 0, row 1): bottom-left corner region (0..44, 1080-44..1080)
+            tile5_badge = sample_rgb_region(grid_path, x=0, y=1080 - 44, width=44, height=44)
+            self.assertGreater(
+                len([p for p in tile5_badge if p[0] > 220 and p[1] > 220 and p[2] > 220]),
+                150,
+                "Expected badge on 5th tile",
+            )
+
+            # Unused trailing cell (col 1, row 1: x=960..1004, y=1080-44..1080) must stay black
+            empty_cell = sample_rgb_region(grid_path, x=960, y=1080 - 44, width=44, height=44)
+            self.assertTrue(
+                all(p[0] < 15 and p[1] < 15 and p[2] < 15 for p in empty_cell),
+                "Unused trailing cell must remain plain black with no badge",
+            )
+
+            # Kept Extracted Frame 1 must remain unbadged (plain black at bottom-left)
+            raw_frame_1 = out_dir / "frames" / "dark_five-001.jpeg"
+            frame1_bl = sample_rgb_region(raw_frame_1, x=0, y=180 - 44, width=44, height=44)
+            self.assertTrue(
+                all(p[0] < 15 and p[1] < 15 and p[2] < 15 for p in frame1_bl),
+                "Kept Extracted Frames must remain unbadged",
+            )
+
+            # Average RGB CSV and Average Color Barcode must stay pure black unaffected by white badge
+            with (out_dir / "dark_five_averagesRGB.csv").open("r", encoding="utf-8", newline="") as f:
+                rows = list(csv.reader(f))
+            self.assertEqual(rows[1][2:], ["0", "0", "0"])
+
+            barcode_pixels = sample_rgb_region(
+                out_dir / "dark_five_averagesRGB.jpeg", x=0, y=0, width=5, height=715
+            )
+            self.assertTrue(
+                all(p[0] < 15 and p[1] < 15 and p[2] < 15 for p in barcode_pixels),
+                "Average Color Barcode must remain pure black unaffected by Frame Badges",
+            )
+
+    def test_continues_badge_numbering_across_multi_sheet_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            video = tmp_dir / "tall_dark.mkv"
+            # 120x2700 -> tile_h = 21600 -> 12 frames/sheet. 13s -> sheet 1 (1..12), sheet 2 (13).
+            create_lossless_black_video(
+                video, duration_sec=13.0, width=120, height=2700, fps=2
+            )
+
+            res = run_cli(str(video))
+            self.assertEqual(res.returncode, 0, msg=res.stderr)
+
+            out_dir = tmp_dir / "tall_dark_filmstrip"
+            sheet1 = out_dir / "tall_dark_grid-001.jpeg"
+            sheet2 = out_dir / "tall_dark_grid-002.jpeg"
+            self.assertTrue(sheet1.is_file())
+            self.assertTrue(sheet2.is_file())
+
+            # Compare inner badge pixels of tile 1 ('1') vs sheet 2 tile 1 ('13')
+            sheet1_badge_inner = sample_rgb_region(sheet1, x=14, y=21600 - 32, width=18, height=18)
+            sheet2_badge_inner = sample_rgb_region(sheet2, x=14, y=21600 - 32, width=18, height=18)
+            self.assertGreater(
+                len([p for p in sheet2_badge_inner if p[0] > 220 and p[1] > 220 and p[2] > 220]),
+                50,
+                "Expected badge on sheet 2 tile 1",
+            )
+            diffs = sum(
+                1 for a, b in zip(sheet1_badge_inner, sheet2_badge_inner) if abs(a[0] - b[0]) > 60
+            )
+            self.assertGreater(diffs, 15, "Sheet 2 tile 1 ('13') must differ from sheet 1 tile 1 ('1')")
+
+            # Sheet 2 unused col 1 must stay black
+            sheet2_empty_cell = sample_rgb_region(sheet2, x=960, y=21600 - 44, width=44, height=44)
+            self.assertTrue(all(p[0] < 15 and p[1] < 15 and p[2] < 15 for p in sheet2_empty_cell))
+
+    def test_fits_three_digit_frame_numbers_inside_white_circle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            video = tmp_dir / "hundred_plus.mkv"
+            create_lossless_black_video(
+                video, duration_sec=1.05, width=160, height=90, fps=100
+            )
+
+            res = run_cli(str(video), "--fps", "100", "--grid-width", "640")
+            self.assertEqual(res.returncode, 0, msg=res.stderr)
+
+            grid_path = tmp_dir / "hundred_plus_filmstrip" / "hundred_plus_grid.jpeg"
+            # Frame 105 is at index 104 -> row 26 (0-based), col 0; tile size 160x90
+            tile_y_bottom = 27 * 90
+            badge_region = sample_rgb_region(
+                grid_path, x=10, y=tile_y_bottom - 44, width=36, height=34
+            )
+            bright_count = sum(1 for p in badge_region if p[0] > 220 and p[1] > 220 and p[2] > 220)
+            self.assertGreater(
+                bright_count,
+                550,
+                f"Expected expanded white circle for 3-digit badge ('105'), got {bright_count} bright pixels",
+            )
+
+    def test_custom_cols_and_trim_keep_badges_aligned_to_populated_tiles(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            video = tmp_dir / "trimmed.mkv"
+            create_lossless_black_video(video, duration_sec=5.0, width=320, height=180)
+
+            res = run_cli(
+                str(video), "--cols", "2", "--grid-width", "640", "--start", "1", "--duration", "3"
+            )
+            self.assertEqual(res.returncode, 0, msg=res.stderr)
+
+            grid_path = tmp_dir / "trimmed_filmstrip" / "trimmed_grid.jpeg"
+            # 3 frames in 2 cols -> 2 rows of 320x180 tiles (640x360 total); col 1 row 1 is empty
+            self.assertEqual(probe_image_size(grid_path), (640, 360))
+            tile3_badge = sample_rgb_region(grid_path, x=0, y=360 - 44, width=44, height=44)
+            self.assertGreater(
+                len([p for p in tile3_badge if p[0] > 220 and p[1] > 220 and p[2] > 220]),
+                150,
+            )
+            empty_cell = sample_rgb_region(grid_path, x=320, y=360 - 44, width=44, height=44)
+            self.assertTrue(all(p[0] < 15 and p[1] < 15 and p[2] < 15 for p in empty_cell))
 
 
 class MultiSheetGridTests(unittest.TestCase):

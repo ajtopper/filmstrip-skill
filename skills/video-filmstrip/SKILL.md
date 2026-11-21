@@ -39,8 +39,8 @@ Pass optional flags only when overriding defaults:
 - `--duration <sec>`: Clip duration in seconds (`-t`)
 
 3. Verify the generated artifacts inside the output folder:
-   - `frames/<prefix>-001.jpeg` ... (kept Extracted Frames at original video resolution)
-   - `<prefix>_grid.jpeg` or numbered `<prefix>_grid-001.jpeg` ... (4-column Filmstrip Grid sheets, auto-split at FFmpeg's `65500px` JPEG height cap)
+   - `frames/<prefix>-001.jpeg` ... (kept Extracted Frames at original video resolution, unbadged)
+   - `<prefix>_grid.jpeg` or numbered `<prefix>_grid-001.jpeg` ... (4-column Filmstrip Grid sheets with bottom-left 16px Frame Badges showing 1-based appearance order on circular white backgrounds, auto-split at FFmpeg's `65500px` JPEG height cap)
    - `<prefix>_averagesRGB.jpeg` (Average Color Barcode)
    - `<prefix>_averagesRGB.csv` (`frame,timestamp_sec,r,g,b` rows matching the extracted frame count)
 4. Report the output directory and clickable links for the generated grid sheet(s), barcode, CSV, and frames folder.

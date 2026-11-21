@@ -8,6 +8,7 @@ import csv
 from dataclasses import dataclass
 import json
 import math
+import os
 import shutil
 import subprocess
 import sys
@@ -15,6 +16,19 @@ import tempfile
 from pathlib import Path
 
 JPEG_MAX_DIMENSION = 65500
+BADGE_FONT_SIZE = 16
+BADGE_BASE_DIAMETER = 26
+BADGE_EXTRA_DIGIT_PX = 8
+BADGE_MARGIN = 10
+
+_WINDOWS_FONT_NAMES = ("arialbd.ttf", "arial.ttf", "segoeui.ttf", "calibrib.ttf")
+_POSIX_FONT_CANDIDATES = (
+    Path("/System/Library/Fonts/Helvetica.ttc"),
+    Path("/Library/Fonts/Arial.ttf"),
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    Path("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+)
 
 
 @dataclass(frozen=True)
@@ -112,6 +126,73 @@ def _escape_image2_pattern(path: Path) -> str:
 def _concat_escape(path: Path) -> str:
     """Escape a filesystem path for FFmpeg's concat demuxer on Windows/POSIX."""
     return str(path).replace("\\", "/").replace("'", "'\\''")
+
+
+def _filter_escape_path(path: Path) -> str:
+    """Escape a filesystem path for FFmpeg filter option strings such as fontfile."""
+    return str(path).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+
+
+def _badge_diameter_for_total_frames(total_frames: int) -> int:
+    """Size the circular badge to fit the widest frame index at BADGE_FONT_SIZE."""
+    digits = len(str(max(1, total_frames)))
+    if digits <= 2:
+        return BADGE_BASE_DIAMETER
+    return BADGE_BASE_DIAMETER + (digits - 2) * BADGE_EXTRA_DIGIT_PX
+
+
+def _find_sans_serif_font() -> Path | None:
+    """Locate a reliable sans-serif TrueType/OpenType font across OSes."""
+    if os.name == "nt":
+        win_root = Path(os.environ.get("WINDIR") or os.environ.get("SystemRoot") or r"C:\Windows")
+        fonts_dir = win_root / "Fonts"
+        for font_name in _WINDOWS_FONT_NAMES:
+            candidate = fonts_dir / font_name
+            if candidate.is_file():
+                return candidate
+
+    fc_match = shutil.which("fc-match")
+    if fc_match is not None:
+        result = subprocess.run(
+            [fc_match, "-f", "%{file}", "sans:bold"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if result.returncode == 0:
+            candidate = Path(result.stdout.strip())
+            if candidate.is_file():
+                return candidate
+
+    for candidate in _POSIX_FONT_CANDIDATES:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _write_circle_badge_pam(pam_path: Path, diameter: int) -> None:
+    """Write a white anti-aliased RGBA circular badge image in P7 PAM format."""
+    radius = diameter / 2.0
+    center = (diameter - 1) / 2.0
+    pixels = bytearray(diameter * diameter * 4)
+    pos = 0
+    for y in range(diameter):
+        dy = y - center
+        for x in range(diameter):
+            dx = x - center
+            dist = math.hypot(dx, dy)
+            alpha = max(0, min(255, round(255 * (radius - dist + 0.5))))
+            pixels[pos] = 255
+            pixels[pos + 1] = 255
+            pixels[pos + 2] = 255
+            pixels[pos + 3] = alpha
+            pos += 4
+    header = (
+        f"P7\nWIDTH {diameter}\nHEIGHT {diameter}\nDEPTH 4\n"
+        f"MAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n"
+    ).encode("ascii")
+    pam_path.write_bytes(header + pixels)
 
 
 def _list_extracted_frames(frames_dir: Path, prefix: str) -> list[Path]:
@@ -225,19 +306,40 @@ def _build_grid_sheet(
     sheet_frames: list[Path],
     geometry: GridGeometry,
     output_path: Path,
+    *,
+    start_frame_number: int = 1,
+    badge_diameter: int = BADGE_BASE_DIAMETER,
 ) -> None:
-    """Assemble sheet_frames into a single Filmstrip Grid sheet."""
+    """Assemble sheet_frames into a single Filmstrip Grid sheet with Frame Badges."""
+    min_tile_size = badge_diameter + 2 * BADGE_MARGIN
+    if geometry.tile_width < min_tile_size or geometry.tile_height < min_tile_size:
+        raise ValueError(
+            f"Tile size ({geometry.tile_width}x{geometry.tile_height}px) is too small "
+            f"for a {badge_diameter}px Frame Badge (minimum {min_tile_size}x{min_tile_size}px)."
+        )
+
     rows = math.ceil(len(sheet_frames) / geometry.cols)
-    vf = (
-        f"scale={geometry.tile_width}:{geometry.tile_height}:force_original_aspect_ratio=decrease,"
+    font_path = _find_sans_serif_font()
+    font_opt = f"fontfile='{_filter_escape_path(font_path)}':" if font_path else ""
+    filter_complex = (
+        f"[0:v]scale={geometry.tile_width}:{geometry.tile_height}:force_original_aspect_ratio=decrease,"
         f"pad={geometry.tile_width}:{geometry.tile_height}:(ow-iw)/2:(oh-ih)/2:color=black,"
-        f"setsar=1,"
-        f"tile={geometry.cols}x{rows}:color=black"
+        f"setsar=1[tile_base];"
+        f"[tile_base][1:v]overlay=x={BADGE_MARGIN}:y=H-h-{BADGE_MARGIN}:eof_action=repeat,"
+        f"drawtext={font_opt}text='%{{eif\\:n+{start_frame_number}\\:d}}':"
+        f"fontsize={BADGE_FONT_SIZE}:fontcolor=black:"
+        f"x={BADGE_MARGIN}+({badge_diameter}-tw)/2:"
+        f"y=h-{BADGE_MARGIN}-{badge_diameter}+({badge_diameter}-th)/2,"
+        f"tile={geometry.cols}x{rows}:color=black[out]"
     )
     with tempfile.TemporaryDirectory() as tmp_dir:
-        concat_file = Path(tmp_dir) / "frames.txt"
+        tmp_path = Path(tmp_dir)
+        concat_file = tmp_path / "frames.txt"
         lines = [f"file '{_concat_escape(frame)}'\n" for frame in sheet_frames]
         concat_file.write_text("".join(lines), encoding="utf-8")
+
+        badge_pam = tmp_path / "badge.pam"
+        _write_circle_badge_pam(badge_pam, badge_diameter)
 
         _run_subprocess(
             [
@@ -252,8 +354,12 @@ def _build_grid_sheet(
                 "0",
                 "-i",
                 str(concat_file),
-                "-vf",
-                vf,
+                "-i",
+                str(badge_pam),
+                "-filter_complex",
+                filter_complex,
+                "-map",
+                "[out]",
                 "-q:v",
                 str(geometry.quality),
                 str(output_path),
@@ -276,6 +382,7 @@ def _write_grid_sheets(
 
     max_rows_per_sheet = JPEG_MAX_DIMENSION // geometry.tile_height
     total_rows = math.ceil(len(frames) / geometry.cols)
+    badge_diameter = _badge_diameter_for_total_frames(len(frames))
 
     single_grid = out_dir / f"{prefix}_grid.jpeg"
     if single_grid.is_file():
@@ -286,7 +393,12 @@ def _write_grid_sheets(
             entry.unlink()
 
     if total_rows <= max_rows_per_sheet:
-        _build_grid_sheet(sheet_frames=frames, geometry=geometry, output_path=single_grid)
+        _build_grid_sheet(
+            sheet_frames=frames,
+            geometry=geometry,
+            output_path=single_grid,
+            badge_diameter=badge_diameter,
+        )
         return [single_grid]
 
     frames_per_sheet = geometry.cols * max_rows_per_sheet
@@ -298,6 +410,8 @@ def _write_grid_sheets(
             sheet_frames=frames[idx : idx + frames_per_sheet],
             geometry=geometry,
             output_path=sheet_path,
+            start_frame_number=idx + 1,
+            badge_diameter=badge_diameter,
         )
         sheets.append(sheet_path)
     return sheets
