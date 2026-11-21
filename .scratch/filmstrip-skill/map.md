@@ -26,6 +26,8 @@ An English-language Antigravity skill (`SKILL.md` + `scripts/`) using FFmpeg and
 ## Decisions so far
 
 <!-- Index of resolved tickets: one-line gist + link -->
+- **[Output Dimensions and JPEG Limits](issues/01-output-dimensions-and-jpeg-limits.md)**: Grid targets `3840px` total width (`960px`/tile across 4 cols) and auto-splits into numbered JPEG Grid Sheets at `65500px` height; kept extracted frames stay at original video resolution; barcode defaults to `1px`/frame × `715px` height.
+- **[FFmpeg + Python Stdlib Pipeline Research](issues/02-ffmpeg-python-pipeline-research.md)**: Single-pass `fps=<rate>,split=2` extracts JPEGs (`-q:v 2`) + streams `format=rgb24,scale=1:1:flags=area+accurate_rnd` raw bytes to Python, then Pass 2 runs `tile=4x<rows>` via `sequence`/`concat` (never `glob` on Windows) respecting FFmpeg `mjpeg`'s `65500px` axis cap and piping barcode bytes with `flags=neighbor` ([research](research/02-ffmpeg-python-pipeline.md)).
 
 ## Not yet specified
 
